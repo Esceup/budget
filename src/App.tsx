@@ -61,6 +61,8 @@ function App() {
   const [editCategoryName, setEditCategoryName] = useState('');
   const [editExpenseName, setEditExpenseName] = useState('');
   const [editExpenseAmount, setEditExpenseAmount] = useState('');
+  // Выделенные расходы (подкатегории)
+  const [selectedExpenses, setSelectedExpenses] = useState<Set<string>>(new Set());
 
   // Загружаем доход пользователя при авторизации
   useEffect(() => {
@@ -87,6 +89,22 @@ function App() {
     } catch (error) {
       console.error('Ошибка загрузки дохода:', error);
     }
+  };
+
+  // Обработчик клика на подкатегорию (расход)
+  const handleExpenseClick = (expenseId: string, e: React.MouseEvent) => {
+    // Предотвращаем всплытие события, чтобы не срабатывали клики на редактирование/удаление
+    e.stopPropagation();
+    
+    setSelectedExpenses(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(expenseId)) {
+        newSet.delete(expenseId); // Снимаем выделение
+      } else {
+        newSet.add(expenseId); // Добавляем выделение
+      }
+      return newSet;
+    });
   };
 
   const login = async () => {
@@ -643,7 +661,10 @@ function App() {
                           {category.expenses.map((expense: any) => (
                             <div 
                               key={expense.id}
-                              className="flex items-center justify-between p-3 border border-gray-100 rounded hover:bg-gray-50 transition"
+                              onClick={(e) => handleExpenseClick(expense.id, e)}
+                              className={`flex items-center justify-between p-3 border border-gray-100 rounded hover:bg-gray-50 transition cursor-pointer ${
+                                selectedExpenses.has(expense.id) ? 'bg-green-50 border-green-200' : ''
+                              }`}
                             >
                               <div className="flex-1">
                                 {editingExpense === expense.id ? (
