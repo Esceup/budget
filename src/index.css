@@ -1,0 +1,88 @@
+/* src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Кастомные стили для аскетичного дизайна */
+:root {
+  --border-color: #e5e7eb;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+}
+
+/* Улучшенные инпуты */
+input[type="text"],
+input[type="number"],
+input[type="email"],
+input[type="password"] {
+  @apply transition-colors;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus {
+  @apply ring-1 ring-gray-400;
+}
+
+/* Стили для кнопок */
+.btn {
+  @apply transition-colors duration-200;
+}
+
+.btn-primary {
+  @apply bg-gray-900 text-white hover:bg-gray-800;
+}
+
+.btn-secondary {
+  @apply bg-white text-gray-700 border border-gray-300 hover:bg-gray-50;
+}
+
+.btn-danger {
+  @apply text-red-600 hover:text-red-800;
+}
+
+/* Анимации */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* Кастомный скроллбар */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Улучшение для фокуса доступности */
+*:focus {
+  @apply outline-none;
+}
+
+*:focus-visible {
+  @apply ring-2 ring-gray-400 ring-offset-2;
+}
