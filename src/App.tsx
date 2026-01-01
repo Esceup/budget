@@ -712,7 +712,7 @@ function App() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-3">
-                                <span className="font-semibold text-gray-900">
+                                <span className="font-semibold text-gray-900 text-sm">
                                   {expense.amount?.toLocaleString()} ₽
                                 </span>
                                 <button
