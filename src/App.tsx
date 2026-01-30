@@ -19,6 +19,40 @@ import {
   updateDoc 
 } from 'firebase/firestore';
 
+// Определение типов
+interface Expense {
+  id: string;
+  name: string;
+  amount: number;
+  categoryId: string;
+  userId: string;
+  date: string;
+  selected: boolean;
+  createdAt?: any;
+}
+
+interface Category {
+  id: string;
+  name: string;
+  userId: string;
+  createdAt?: any;
+  expenses?: Expense[];
+}
+
+interface UserData {
+  uid: string;
+  email: string;
+  displayName: string;
+  monthlyIncome: number;
+  currency: string;
+  createdAt?: any;
+}
+
+interface ExpenseInputs {
+  name: string;
+  amount: string;
+}
+
 // Иконки для редактирования и удаления
 const EditIcon = () => (
   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -49,22 +83,17 @@ function App() {
   const [name, setName] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   const [income, setIncome] = useState(0);
-  const [categories, setCategories] = useState<any[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   
-  // Для каждой категории свой набор полей для добавления расхода
-  const [expenseInputs, setExpenseInputs] = useState<Record<string, {name: string, amount: string}>>({});
-  // Скрытые/развернутые категории
+  const [expenseInputs, setExpenseInputs] = useState<Record<string, ExpenseInputs>>({});
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
-  // Редактирование категорий и расходов
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingExpense, setEditingExpense] = useState<string | null>(null);
   const [editCategoryName, setEditCategoryName] = useState('');
   const [editExpenseName, setEditExpenseName] = useState('');
   const [editExpenseAmount, setEditExpenseAmount] = useState('');
-  // Выделенные расходы (подкатегории)
   const [selectedExpenses, setSelectedExpenses] = useState<Set<string>>(new Set());
 
-  // Загружаем доход пользователя при авторизации
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
@@ -76,14 +105,13 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  // Загружаем доход пользователя
   const loadUserIncome = async (userId: string) => {
     try {
       const usersQuery = query(collection(db, 'users'), where('uid', '==', userId));
       const usersSnapshot = await getDocs(usersQuery);
       
       if (!usersSnapshot.empty) {
-        const userData = usersSnapshot.docs[0].data();
+        const userData = usersSnapshot.docs[0].data() as UserData;
         setIncome(userData.monthlyIncome || 0);
       }
     } catch (error) {
@@ -91,20 +119,52 @@ function App() {
     }
   };
 
-  // Обработчик клика на подкатегорию (расход)
-  const handleExpenseClick = (expenseId: string, e: React.MouseEvent) => {
-    // Предотвращаем всплытие события, чтобы не срабатывали клики на редактирование/удаление
+  const handleExpenseClick = async (expenseId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    setSelectedExpenses(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(expenseId)) {
-        newSet.delete(expenseId); // Снимаем выделение
-      } else {
-        newSet.add(expenseId); // Добавляем выделение
-      }
-      return newSet;
-    });
+    const newSelected = !selectedExpenses.has(expenseId);
+    
+    try {
+      await updateDoc(doc(db, 'expenses', expenseId), {
+        selected: newSelected
+      });
+      
+      setSelectedExpenses(prev => {
+        const newSet = new Set(prev);
+        if (newSelected) {
+          newSet.add(expenseId);
+        } else {
+          newSet.delete(expenseId);
+        }
+        return newSet;
+      });
+      
+      setCategories(prevCategories => {
+        const updatedCategories = prevCategories.map(category => {
+          if (category.expenses) {
+            const updatedExpenses = category.expenses.map(expense => {
+              if (expense.id === expenseId) {
+                return {
+                  ...expense,
+                  selected: newSelected
+                };
+              }
+              return expense;
+            });
+            return {
+              ...category,
+              expenses: updatedExpenses
+            };
+          }
+          return category;
+        });
+        return updatedCategories;
+      });
+      
+    } catch (error) {
+      console.error('Ошибка обновления состояния расхода:', error);
+      alert('Ошибка сохранения состояния');
+    }
   };
 
   const login = async () => {
@@ -118,12 +178,10 @@ function App() {
   const register = async () => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      // Обновляем имя пользователя
       await updateProfile(userCredential.user, {
         displayName: name
       });
       
-      // Создаем документ пользователя в Firestore
       await addDoc(collection(db, 'users'), {
         uid: userCredential.user.uid,
         email: email,
@@ -162,15 +220,13 @@ function App() {
 
   const loadCategories = async (userId: string) => {
     try {
-      // Загружаем категории
       const categoriesQuery = query(collection(db, 'categories'), where('userId', '==', userId));
       const categoriesSnapshot = await getDocs(categoriesQuery);
       const categoriesData = categoriesSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
-      }));
+      })) as Category[];
 
-      // Для каждой категории загружаем расходы
       const categoriesWithExpenses = await Promise.all(
         categoriesData.map(async (category) => {
           const expensesQuery = query(
@@ -180,8 +236,9 @@ function App() {
           const expensesSnapshot = await getDocs(expensesQuery);
           const expenses = expensesSnapshot.docs.map(doc => ({
             id: doc.id,
-            ...doc.data()
-          }));
+            ...doc.data(),
+            selected: doc.data().selected || false
+          })) as Expense[];
 
           return {
             ...category,
@@ -192,12 +249,21 @@ function App() {
 
       setCategories(categoriesWithExpenses);
       
-      // Инициализируем поля ввода для каждой категории
-      const initialInputs: Record<string, {name: string, amount: string}> = {};
+      const initialSelected = new Set<string>();
+      categoriesWithExpenses.forEach(category => {
+        category.expenses?.forEach(expense => {
+          if (expense.selected) {
+            initialSelected.add(expense.id);
+          }
+        });
+      });
+      setSelectedExpenses(initialSelected);
+      
+      const initialInputs: Record<string, ExpenseInputs> = {};
       const initialExpanded: Record<string, boolean> = {};
-      categoriesWithExpenses.forEach(cat => {
-        initialInputs[cat.id] = { name: '', amount: '' };
-        initialExpanded[cat.id] = true; // По умолчанию все категории развернуты
+      categoriesWithExpenses.forEach(category => {
+        initialInputs[category.id] = { name: '', amount: '' };
+        initialExpanded[category.id] = true;
       });
       setExpenseInputs(initialInputs);
       setExpandedCategories(initialExpanded);
@@ -255,10 +321,21 @@ function App() {
     }
 
     try {
+      let currentSelected = false;
+      categories.forEach(category => {
+        category.expenses?.forEach(expense => {
+          if (expense.id === expenseId) {
+            currentSelected = expense.selected || false;
+          }
+        });
+      });
+      
       await updateDoc(doc(db, 'expenses', expenseId), {
         name: editExpenseName.trim(),
-        amount: amount
+        amount: amount,
+        selected: currentSelected
       });
+      
       setEditingExpense(null);
       loadCategories(user.uid);
     } catch (error) {
@@ -287,17 +364,16 @@ function App() {
         categoryId: categoryId,
         name: inputs.name.trim(),
         amount: amount,
+        selected: false,
         date: new Date().toISOString().split('T')[0],
         createdAt: serverTimestamp()
       });
 
-      // Очищаем поля ввода для этой категории
       setExpenseInputs(prev => ({
         ...prev,
         [categoryId]: { name: '', amount: '' }
       }));
 
-      // Перезагружаем данные
       loadCategories(user.uid);
       
     } catch (error) {
@@ -308,10 +384,8 @@ function App() {
   const deleteCategory = async (categoryId: string) => {
     if (window.confirm('Удалить категорию и все её расходы?')) {
       try {
-        // Удаляем категорию
         await deleteDoc(doc(db, 'categories', categoryId));
         
-        // Удаляем все расходы этой категории
         const expensesQuery = query(collection(db, 'expenses'), where('categoryId', '==', categoryId));
         const expensesSnapshot = await getDocs(expensesQuery);
         
@@ -342,7 +416,6 @@ function App() {
     if (!user) return;
     
     try {
-      // Находим документ пользователя
       const usersQuery = query(collection(db, 'users'), where('uid', '==', user.uid));
       const usersSnapshot = await getDocs(usersQuery);
       
@@ -352,7 +425,6 @@ function App() {
           monthlyIncome: income
         });
       } else {
-        // Создаем документ если его нет
         await addDoc(collection(db, 'users'), {
           uid: user.uid,
           email: user.email,
@@ -370,14 +442,52 @@ function App() {
     }
   };
 
-  // Подсчет общей суммы расходов
+  const bulkToggleExpenses = async (expenseIds: string[], selected: boolean) => {
+    if (!user || expenseIds.length === 0) return;
+    
+    try {
+      const updatePromises = expenseIds.map(expenseId => 
+        updateDoc(doc(db, 'expenses', expenseId), {
+          selected: selected
+        })
+      );
+      
+      await Promise.all(updatePromises);
+      
+      setSelectedExpenses(prev => {
+        const newSet = new Set(prev);
+        expenseIds.forEach(id => {
+          if (selected) {
+            newSet.add(id);
+          } else {
+            newSet.delete(id);
+          }
+        });
+        return newSet;
+      });
+      
+      loadCategories(user.uid);
+      
+    } catch (error) {
+      console.error('Ошибка массового обновления:', error);
+      alert('Ошибка сохранения изменений');
+    }
+  };
+
+  const resetAllSelected = async () => {
+    if (!user || selectedExpenses.size === 0) return;
+    
+    if (window.confirm('Снять выделение со всех отложенных расходов?')) {
+      await bulkToggleExpenses(Array.from(selectedExpenses), false);
+    }
+  };
+
   const totalExpenses = categories.reduce((total, category) => {
-    const categoryTotal = category.expenses?.reduce((sum: number, expense: any) => 
+    const categoryTotal = category.expenses?.reduce((sum, expense) => 
       sum + (expense.amount || 0), 0) || 0;
     return total + categoryTotal;
   }, 0);
 
-  // Обновление поля ввода для конкретной категории
   const updateExpenseInput = (categoryId: string, field: 'name' | 'amount', value: string) => {
     setExpenseInputs(prev => ({
       ...prev,
@@ -388,7 +498,6 @@ function App() {
     }));
   };
 
-  // Если пользователь не авторизован, показываем форму входа/регистрации
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -465,10 +574,8 @@ function App() {
     );
   }
 
-  // Основной интерфейс для авторизованного пользователя
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Шапка */}
       <header className="bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -509,7 +616,6 @@ function App() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-6">
-        {/* Статистика */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
             <div className="flex items-center justify-between">
@@ -546,22 +652,38 @@ function App() {
           </div>
         </div>
 
-        {/* Добавление категории */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-medium text-gray-900 mb-1">Отложенные расходы</h2>
+              <p className="text-sm text-gray-600">
+                {selectedExpenses.size} отложено • Кликните на расход, чтобы изменить его статус
+              </p>
+            </div>
+            {selectedExpenses.size > 0 && (
+              <button
+                onClick={resetAllSelected}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200 transition"
+              >
+                Сбросить все ({selectedExpenses.size})
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6 shadow-sm">
           <h2 className="text-lg font-medium text-gray-900 mb-3">Добавить категорию</h2>
           <CategoryForm onAddCategory={addCategory} />
         </div>
 
-        {/* Список категорий */}
         <div className="space-y-4">
           {categories.map((category) => {
-            const categoryTotal = category.expenses?.reduce((sum: number, expense: any) => 
+            const categoryTotal = category.expenses?.reduce((sum, expense) => 
               sum + (expense.amount || 0), 0) || 0;
             const isExpanded = expandedCategories[category.id] || false;
 
             return (
               <div key={category.id} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-                {/* Заголовок категории */}
                 <div className="border-b border-gray-100">
                   <div className="p-4">
                     <div className="flex items-center justify-between">
@@ -625,10 +747,8 @@ function App() {
                   </div>
                 </div>
 
-                {/* Содержимое категории (скрывается/показывается) */}
                 {isExpanded && (
                   <div className="p-4">
-                    {/* Форма добавления расхода */}
                     <div className="mb-4">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <input
@@ -654,16 +774,17 @@ function App() {
                       </div>
                     </div>
 
-                    {/* Список расходов */}
                     <div>
-                      {category.expenses?.length > 0 ? (
+                      {category.expenses && category.expenses.length > 0 ? (
                         <div className="space-y-2">
-                          {category.expenses.map((expense: any) => (
+                          {category.expenses.map((expense) => (
                             <div 
                               key={expense.id}
                               onClick={(e) => handleExpenseClick(expense.id, e)}
-                              className={`flex items-center justify-between p-3 border border-gray-100 rounded hover:bg-gray-50 transition cursor-pointer ${
-                                selectedExpenses.has(expense.id) ? 'bg-green-50 border-green-200' : ''
+                              className={`flex items-center justify-between p-3 border rounded hover:bg-gray-50 transition cursor-pointer ${
+                                selectedExpenses.has(expense.id) 
+                                  ? 'bg-green-50 border-green-200' 
+                                  : 'bg-red-50 border-red-100'
                               }`}
                             >
                               <div className="flex-1">
@@ -713,7 +834,7 @@ function App() {
                               </div>
                               <div className="flex items-center gap-3">
                                 <span className="font-semibold text-gray-900 text-sm">
-                                  {expense.amount?.toLocaleString()} ₽
+                                  {expense.amount.toLocaleString()} ₽
                                 </span>
                                 <button
                                   onClick={() => deleteExpense(expense.id, expense.name)}
@@ -755,7 +876,6 @@ function App() {
   );
 }
 
-// Компонент формы добавления категории
 const CategoryForm: React.FC<{ onAddCategory: (name: string) => void }> = ({ onAddCategory }) => {
   const [categoryName, setCategoryName] = useState('');
 
