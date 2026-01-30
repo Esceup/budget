@@ -125,10 +125,12 @@ function App() {
     const newSelected = !selectedExpenses.has(expenseId);
     
     try {
+      // Сохраняем в Firestore
       await updateDoc(doc(db, 'expenses', expenseId), {
         selected: newSelected
       });
       
+      // Обновляем локальное состояние selectedExpenses
       setSelectedExpenses(prev => {
         const newSet = new Set(prev);
         if (newSelected) {
@@ -139,6 +141,7 @@ function App() {
         return newSet;
       });
       
+      // Обновляем локальное состояние categories
       setCategories(prevCategories => {
         const updatedCategories = prevCategories.map(category => {
           if (category.expenses) {
@@ -220,6 +223,7 @@ function App() {
 
   const loadCategories = async (userId: string) => {
     try {
+      // Загружаем категории
       const categoriesQuery = query(collection(db, 'categories'), where('userId', '==', userId));
       const categoriesSnapshot = await getDocs(categoriesQuery);
       const categoriesData = categoriesSnapshot.docs.map(doc => ({
@@ -227,6 +231,7 @@ function App() {
         ...doc.data()
       })) as Category[];
 
+      // Для каждой категории загружаем расходы
       const categoriesWithExpenses = await Promise.all(
         categoriesData.map(async (category) => {
           const expensesQuery = query(
@@ -234,11 +239,19 @@ function App() {
             where('categoryId', '==', category.id)
           );
           const expensesSnapshot = await getDocs(expensesQuery);
-          const expenses = expensesSnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            selected: doc.data().selected || false
-          })) as Expense[];
+          const expenses = expensesSnapshot.docs.map(doc => {
+            const expenseData = doc.data();
+            return {
+              id: doc.id,
+              name: expenseData.name || '',
+              amount: expenseData.amount || 0,
+              categoryId: expenseData.categoryId || '',
+              userId: expenseData.userId || '',
+              date: expenseData.date || new Date().toISOString().split('T')[0],
+              selected: expenseData.selected || false, // Важно: загружаем сохраненное состояние
+              createdAt: expenseData.createdAt
+            } as Expense;
+          });
 
           return {
             ...category,
@@ -249,6 +262,7 @@ function App() {
 
       setCategories(categoriesWithExpenses);
       
+      // Восстанавливаем состояние selectedExpenses из загруженных данных
       const initialSelected = new Set<string>();
       categoriesWithExpenses.forEach(category => {
         category.expenses?.forEach(expense => {
@@ -259,6 +273,7 @@ function App() {
       });
       setSelectedExpenses(initialSelected);
       
+      // Инициализируем поля ввода для каждой категории
       const initialInputs: Record<string, ExpenseInputs> = {};
       const initialExpanded: Record<string, boolean> = {};
       categoriesWithExpenses.forEach(category => {
@@ -321,19 +336,20 @@ function App() {
     }
 
     try {
+      // Находим текущее состояние selected
       let currentSelected = false;
       categories.forEach(category => {
-        category.expenses?.forEach(expense => {
-          if (expense.id === expenseId) {
-            currentSelected = expense.selected || false;
-          }
-        });
+        const expense = category.expenses?.find(exp => exp.id === expenseId);
+        if (expense) {
+          currentSelected = expense.selected || false;
+        }
       });
       
+      // Обновляем в Firestore
       await updateDoc(doc(db, 'expenses', expenseId), {
         name: editExpenseName.trim(),
         amount: amount,
-        selected: currentSelected
+        selected: currentSelected // Сохраняем текущее состояние selected
       });
       
       setEditingExpense(null);
@@ -364,16 +380,18 @@ function App() {
         categoryId: categoryId,
         name: inputs.name.trim(),
         amount: amount,
-        selected: false,
+        selected: false, // Новые расходы по умолчанию не отложены
         date: new Date().toISOString().split('T')[0],
         createdAt: serverTimestamp()
       });
 
+      // Очищаем поля ввода
       setExpenseInputs(prev => ({
         ...prev,
         [categoryId]: { name: '', amount: '' }
       }));
 
+      // Перезагружаем данные
       loadCategories(user.uid);
       
     } catch (error) {
@@ -384,8 +402,10 @@ function App() {
   const deleteCategory = async (categoryId: string) => {
     if (window.confirm('Удалить категорию и все её расходы?')) {
       try {
+        // Удаляем категорию
         await deleteDoc(doc(db, 'categories', categoryId));
         
+        // Удаляем все расходы этой категории
         const expensesQuery = query(collection(db, 'expenses'), where('categoryId', '==', categoryId));
         const expensesSnapshot = await getDocs(expensesQuery);
         
@@ -416,6 +436,7 @@ function App() {
     if (!user) return;
     
     try {
+      // Находим документ пользователя
       const usersQuery = query(collection(db, 'users'), where('uid', '==', user.uid));
       const usersSnapshot = await getDocs(usersQuery);
       
@@ -425,6 +446,7 @@ function App() {
           monthlyIncome: income
         });
       } else {
+        // Создаем документ если его нет
         await addDoc(collection(db, 'users'), {
           uid: user.uid,
           email: user.email,
@@ -454,6 +476,7 @@ function App() {
       
       await Promise.all(updatePromises);
       
+      // Обновляем локальное состояние
       setSelectedExpenses(prev => {
         const newSet = new Set(prev);
         expenseIds.forEach(id => {
@@ -466,6 +489,7 @@ function App() {
         return newSet;
       });
       
+      // Перезагружаем данные
       loadCategories(user.uid);
       
     } catch (error) {
@@ -777,75 +801,86 @@ function App() {
                     <div>
                       {category.expenses && category.expenses.length > 0 ? (
                         <div className="space-y-2">
-                          {category.expenses.map((expense) => (
-                            <div 
-                              key={expense.id}
-                              onClick={(e) => handleExpenseClick(expense.id, e)}
-                              className={`flex items-center justify-between p-3 border rounded hover:bg-gray-50 transition cursor-pointer ${
-                                selectedExpenses.has(expense.id) 
-                                  ? 'bg-green-50 border-green-200' 
-                                  : 'bg-red-50 border-red-100'
-                              }`}
-                            >
-                              <div className="flex-1">
-                                {editingExpense === expense.id ? (
-                                  <div className="flex items-center gap-2">
-                                    <input
-                                      type="text"
-                                      value={editExpenseName}
-                                      onChange={(e) => setEditExpenseName(e.target.value)}
-                                      className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-gray-400 w-32"
-                                      autoFocus
-                                    />
-                                    <input
-                                      type="number"
-                                      value={editExpenseAmount}
-                                      onChange={(e) => setEditExpenseAmount(e.target.value)}
-                                      className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-gray-400 w-24"
-                                    />
-                                    <button
-                                      onClick={() => saveExpense(expense.id)}
-                                      className="text-xs bg-gray-900 text-white px-2 py-1 rounded hover:bg-gray-800"
-                                    >
-                                      ✓
-                                    </button>
-                                    <button
-                                      onClick={() => setEditingExpense(null)}
-                                      className="text-xs text-gray-500 hover:text-gray-700"
-                                    >
-                                      ✕
-                                    </button>
+                          {category.expenses.map((expense) => {
+                            const isSelected = selectedExpenses.has(expense.id);
+                            return (
+                              <div 
+                                key={expense.id}
+                                onClick={(e) => handleExpenseClick(expense.id, e)}
+                                className={`flex items-center justify-between p-3 border rounded transition cursor-pointer ${
+                                  isSelected 
+                                    ? 'bg-green-50 border-green-200 hover:bg-green-100' 
+                                    : 'bg-red-50 border-red-200 hover:bg-red-100'
+                                }`}
+                              >
+                                <div className="flex-1">
+                                  {editingExpense === expense.id ? (
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        value={editExpenseName}
+                                        onChange={(e) => setEditExpenseName(e.target.value)}
+                                        className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-gray-400 w-32"
+                                        autoFocus
+                                      />
+                                      <input
+                                        type="number"
+                                        value={editExpenseAmount}
+                                        onChange={(e) => setEditExpenseAmount(e.target.value)}
+                                        className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-gray-400 w-24"
+                                      />
+                                      <button
+                                        onClick={() => saveExpense(expense.id)}
+                                        className="text-xs bg-gray-900 text-white px-2 py-1 rounded hover:bg-gray-800"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        onClick={() => setEditingExpense(null)}
+                                        className="text-xs text-gray-500 hover:text-gray-700"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-3">
+                                      <span className="font-medium text-gray-900">{expense.name}</span>
+                                      <button
+                                        onClick={() => startEditExpense(expense.id, expense.name, expense.amount)}
+                                        className="text-gray-400 hover:text-gray-600 text-xs"
+                                        title="Редактировать"
+                                      >
+                                        <EditIcon />
+                                      </button>
+                                    </div>
+                                  )}
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    {new Date(expense.date).toLocaleDateString('ru-RU')}
+                                    {isSelected && (
+                                      <span className="ml-2 text-green-600 font-medium">
+                                        (отложен)
+                                      </span>
+                                    )}
                                   </div>
-                                ) : (
-                                  <div className="flex items-center gap-3">
-                                    <span className="font-medium text-gray-900">{expense.name}</span>
-                                    <button
-                                      onClick={() => startEditExpense(expense.id, expense.name, expense.amount)}
-                                      className="text-gray-400 hover:text-gray-600 text-xs"
-                                      title="Редактировать"
-                                    >
-                                      <EditIcon />
-                                    </button>
-                                  </div>
-                                )}
-                                <div className="text-xs text-gray-500 mt-1">
-                                  {new Date(expense.date).toLocaleDateString('ru-RU')}
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <span className="font-semibold text-gray-900 text-sm">
+                                    {expense.amount.toLocaleString()} ₽
+                                  </span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteExpense(expense.id, expense.name);
+                                    }}
+                                    className="text-gray-400 hover:text-red-500 transition"
+                                    title="Удалить расход"
+                                  >
+                                    <DeleteIcon />
+                                  </button>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-3">
-                                <span className="font-semibold text-gray-900 text-sm">
-                                  {expense.amount.toLocaleString()} ₽
-                                </span>
-                                <button
-                                  onClick={() => deleteExpense(expense.id, expense.name)}
-                                  className="text-gray-400 hover:text-red-500 transition"
-                                  title="Удалить расход"
-                                >
-                                  <DeleteIcon />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="text-center py-4 text-gray-500 text-sm">
