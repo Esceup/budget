@@ -613,7 +613,7 @@ function App() {
               <h1 className="text-2xl font-semibold text-gray-900">📊 Учет расходов</h1>
             </div>
             
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 mr-[60px]">
               <div className="">
                 <p className="text-sm text-gray-600">Доход в месяц</p>
                 <div className="flex items-center gap-2">
